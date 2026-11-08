@@ -17,8 +17,8 @@ class BudgetPlanTest {
                     name = "Expenses",
                     shareBasisPoints = 10_000,
                     lineItems = listOf(
-                        BudgetLineItem("housing", "Housing", "Account A", 80_100),
-                        BudgetLineItem("utilities", "Utilities", "Account B", 1_200),
+                        BudgetLineItem("housing", "Housing", null, 80_100),
+                        BudgetLineItem("utilities", "Utilities", null, 1_200),
                     ),
                 ),
             ),
@@ -37,6 +37,33 @@ class BudgetPlanTest {
                 BudgetBucket("a", "A", 6_000),
                 BudgetBucket("b", "B", 4_001),
             ),
+        )
+    }
+
+    @Test
+    fun linksIncomeAndBudgetItemsToKnownBanks() {
+        val plan = BudgetPlan(
+            incomeSources = listOf(IncomeSource("income", "Salary", 1_000, "bank-a")),
+            buckets = listOf(
+                BudgetBucket(
+                    "expenses",
+                    "Expenses",
+                    10_000,
+                    listOf(BudgetLineItem("rent", "Housing", "bank-a", 1_000)),
+                ),
+            ),
+            banks = listOf(Bank("bank-a", "Primary bank")),
+        )
+
+        assertEquals("bank-a", plan.incomeSources.single().bankId)
+        assertEquals("bank-a", plan.buckets.single().lineItems.single().bankId)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsUnknownBankReferences() {
+        BudgetPlan(
+            incomeSources = listOf(IncomeSource("income", "Salary", 1_000, "missing-bank")),
+            buckets = emptyList(),
         )
     }
 }

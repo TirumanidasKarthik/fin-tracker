@@ -7,6 +7,7 @@ import com.fintracker.app.domain.budget.BudgetBucket
 import com.fintracker.app.domain.budget.BudgetLineItem
 import com.fintracker.app.domain.budget.BudgetPlan
 import com.fintracker.app.domain.budget.BudgetRepository
+import com.fintracker.app.domain.budget.Bank
 import com.fintracker.app.domain.budget.IncomeSource
 import com.fintracker.app.domain.budget.FULL_ALLOCATION_BASIS_POINTS
 import java.util.UUID
@@ -14,9 +15,22 @@ import java.util.UUID
 class SqliteBudgetRepository(private val database: BudgetDatabase) : BudgetRepository {
     override fun loadPlan(): BudgetPlan {
         val db = database.readableDatabase
+        val banks = db.query(
+            BudgetDatabase.TABLE_BANK,
+            arrayOf("id", "name"),
+            null,
+            null,
+            null,
+            null,
+            "sort_order ASC, name COLLATE NOCASE ASC",
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) add(Bank(cursor.getString(0), cursor.getString(1)))
+            }
+        }
         val incomeSources = db.query(
             BudgetDatabase.TABLE_INCOME_SOURCE,
-            arrayOf("id", "name", "amount_paise"),
+            arrayOf("id", "name", "amount_paise", "bank_id"),
             null,
             null,
             null,
@@ -25,7 +39,14 @@ class SqliteBudgetRepository(private val database: BudgetDatabase) : BudgetRepos
         ).use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
-                    add(IncomeSource(cursor.getString(0), cursor.getString(1), cursor.getLong(2)))
+                    add(
+                        IncomeSource(
+                            id = cursor.getString(0),
+                            name = cursor.getString(1),
+                            amountInPaise = cursor.getLong(2),
+                            bankId = cursor.getString(3),
+                        ),
+                    )
                 }
             }
         }
@@ -51,11 +72,51 @@ class SqliteBudgetRepository(private val database: BudgetDatabase) : BudgetRepos
             }
         }
 
-        return BudgetPlan(incomeSources = incomeSources, buckets = buckets)
+        return BudgetPlan(incomeSources = incomeSources, buckets = buckets, banks = banks)
     }
 
-    override fun addIncomeSource(name: String, amountInPaise: Long) {
+    override fun addBank(name: String) {
+        val cleanedName = name.trim()
+        require(cleanedName.isNotEmpty()) { "Bank name is required." }
+        require(loadPlan().banks.none { it.name.equals(cleanedName, ignoreCase = true) }) {
+            "A bank with this name already exists."
+        }
+        val db = database.writableDatabase
+        db.insertOrThrow(
+            BudgetDatabase.TABLE_BANK,
+            null,
+            ContentValues().apply {
+                put("id", UUID.randomUUID().toString())
+                put("name", cleanedName)
+                put("sort_order", nextSortOrder(db, BudgetDatabase.TABLE_BANK))
+            },
+        )
+    }
+
+    override fun deleteBank(bankId: String) {
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            val usageCount = db.rawQuery(
+                "SELECT (SELECT COUNT(*) FROM ${BudgetDatabase.TABLE_INCOME_SOURCE} WHERE bank_id = ?) + " +
+                    "(SELECT COUNT(*) FROM ${BudgetDatabase.TABLE_LINE_ITEM} WHERE bank_id = ?)",
+                arrayOf(bankId, bankId),
+            ).use { cursor ->
+                check(cursor.moveToFirst()) { "Bank usage could not be checked." }
+                cursor.getInt(0)
+            }
+            check(usageCount == 0) { "This bank is in use. Assign another bank before removing it." }
+            val count = db.delete(BudgetDatabase.TABLE_BANK, "id = ?", arrayOf(bankId))
+            check(count == 1) { "Bank was not found." }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    override fun addIncomeSource(name: String, amountInPaise: Long, bankId: String?) {
         val cleanedName = validateIncomeSource(name, amountInPaise)
+        validateBankId(bankId)
         require(loadPlan().incomeSources.none { it.name.equals(cleanedName, ignoreCase = true) }) {
             "An income source with this name already exists."
         }
@@ -67,13 +128,15 @@ class SqliteBudgetRepository(private val database: BudgetDatabase) : BudgetRepos
                 put("id", UUID.randomUUID().toString())
                 put("name", cleanedName)
                 put("amount_paise", amountInPaise)
+                if (bankId == null) putNull("bank_id") else put("bank_id", bankId)
                 put("sort_order", nextSortOrder(db, BudgetDatabase.TABLE_INCOME_SOURCE))
             },
         )
     }
 
-    override fun updateIncomeSource(sourceId: String, name: String, amountInPaise: Long) {
+    override fun updateIncomeSource(sourceId: String, name: String, amountInPaise: Long, bankId: String?) {
         val cleanedName = validateIncomeSource(name, amountInPaise)
+        validateBankId(bankId)
         val sources = loadPlan().incomeSources
         check(sources.any { it.id == sourceId }) { "Income source was not found." }
         require(sources.none { it.id != sourceId && it.name.equals(cleanedName, ignoreCase = true) }) {
@@ -84,6 +147,7 @@ class SqliteBudgetRepository(private val database: BudgetDatabase) : BudgetRepos
             ContentValues().apply {
                 put("name", cleanedName)
                 put("amount_paise", amountInPaise)
+                if (bankId == null) putNull("bank_id") else put("bank_id", bankId)
             },
             "id = ?",
             arrayOf(sourceId),
@@ -107,6 +171,11 @@ class SqliteBudgetRepository(private val database: BudgetDatabase) : BudgetRepos
         return cleanedName
     }
 
+    private fun validateBankId(bankId: String?) {
+        require(!bankId.isNullOrBlank()) { "Select a bank for this item." }
+        check(loadPlan().banks.any { it.id == bankId }) { "The selected bank was not found." }
+    }
+
     override fun updateBucketTarget(bucketId: String, shareBasisPoints: Int) {
         require(shareBasisPoints in 0..FULL_ALLOCATION_BASIS_POINTS) {
             "Target must be between 0% and 100%."
@@ -126,11 +195,15 @@ class SqliteBudgetRepository(private val database: BudgetDatabase) : BudgetRepos
         check(count == 1) { "Bucket target could not be updated." }
     }
 
-    override fun updateLineItemAmount(lineItemId: String, amountInPaise: Long) {
+    override fun updateLineItem(lineItemId: String, amountInPaise: Long, bankId: String?) {
         require(amountInPaise >= 0) { "Amount cannot be negative." }
+        validateBankId(bankId)
         val count = database.writableDatabase.update(
             BudgetDatabase.TABLE_LINE_ITEM,
-            ContentValues().apply { put("amount_paise", amountInPaise) },
+            ContentValues().apply {
+                put("amount_paise", amountInPaise)
+                if (bankId == null) putNull("bank_id") else put("bank_id", bankId)
+            },
             "id = ?",
             arrayOf(lineItemId),
         )
@@ -165,10 +238,11 @@ class SqliteBudgetRepository(private val database: BudgetDatabase) : BudgetRepos
         )
     }
 
-    override fun addLineItem(bucketId: String, label: String, account: String, amountInPaise: Long) {
+    override fun addLineItem(bucketId: String, label: String, bankId: String?, amountInPaise: Long) {
         val cleanedLabel = label.trim()
         require(cleanedLabel.isNotEmpty()) { "Category name is required." }
         require(amountInPaise >= 0) { "Amount cannot be negative." }
+        validateBankId(bankId)
         check(loadPlan().buckets.any { it.id == bucketId }) { "Budget bucket was not found." }
 
         val db = database.writableDatabase
@@ -179,7 +253,8 @@ class SqliteBudgetRepository(private val database: BudgetDatabase) : BudgetRepos
                 put("id", UUID.randomUUID().toString())
                 put("bucket_id", bucketId)
                 put("label", cleanedLabel)
-                put("account", account.trim())
+                put("account", "")
+                if (bankId == null) putNull("bank_id") else put("bank_id", bankId)
                 put("amount_paise", amountInPaise)
                 put("sort_order", nextSortOrder(db, BudgetDatabase.TABLE_LINE_ITEM, "bucket_id = ?", arrayOf(bucketId)))
             },
@@ -198,7 +273,7 @@ class SqliteBudgetRepository(private val database: BudgetDatabase) : BudgetRepos
     private fun loadLineItems(db: SQLiteDatabase, bucketId: String): List<BudgetLineItem> =
         db.query(
             BudgetDatabase.TABLE_LINE_ITEM,
-            arrayOf("id", "label", "account", "amount_paise"),
+            arrayOf("id", "label", "bank_id", "amount_paise"),
             "bucket_id = ?",
             arrayOf(bucketId),
             null,
@@ -211,7 +286,7 @@ class SqliteBudgetRepository(private val database: BudgetDatabase) : BudgetRepos
                         BudgetLineItem(
                             id = cursor.getString(0),
                             label = cursor.getString(1),
-                            account = cursor.getString(2),
+                            bankId = cursor.getString(2),
                             amountInPaise = cursor.getLong(3),
                         ),
                     )

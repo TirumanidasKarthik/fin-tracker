@@ -27,7 +27,7 @@ data class BudgetBucket(
 data class BudgetLineItem(
     val id: String,
     val label: String,
-    val account: String,
+    val bankId: String?,
     val amountInPaise: Long,
 ) {
     init {
@@ -41,6 +41,7 @@ data class IncomeSource(
     val id: String,
     val name: String,
     val amountInPaise: Long,
+    val bankId: String? = null,
 ) {
     init {
         require(id.isNotBlank()) { "Income source id must not be blank." }
@@ -49,13 +50,32 @@ data class IncomeSource(
     }
 }
 
+data class Bank(
+    val id: String,
+    val name: String,
+) {
+    init {
+        require(id.isNotBlank()) { "Bank id must not be blank." }
+        require(name.isNotBlank()) { "Bank name must not be blank." }
+    }
+}
+
 data class BudgetPlan(
     val incomeSources: List<IncomeSource>,
     val buckets: List<BudgetBucket>,
+    val banks: List<Bank> = emptyList(),
 ) {
     init {
+        require(banks.map(Bank::id).distinct().size == banks.size) { "Bank ids must be unique." }
         require(incomeSources.map(IncomeSource::id).distinct().size == incomeSources.size) {
             "Income source ids must be unique."
+        }
+        val bankIds = banks.map(Bank::id).toSet()
+        require(incomeSources.all { it.bankId == null || it.bankId in bankIds }) {
+            "Income sources must reference a bank in this budget."
+        }
+        require(buckets.flatMap { it.lineItems }.all { it.bankId == null || it.bankId in bankIds }) {
+            "Budget items must reference a bank in this budget."
         }
         require(buckets.map(BudgetBucket::id).distinct().size == buckets.size) {
             "Bucket ids must be unique."

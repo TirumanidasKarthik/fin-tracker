@@ -11,11 +11,14 @@ import android.view.View
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ArrayAdapter
 import android.widget.ScrollView
+import android.widget.Spinner
 import android.widget.TextView
 import com.fintracker.app.domain.budget.BudgetBucket
 import com.fintracker.app.domain.budget.BudgetLineItem
 import com.fintracker.app.domain.budget.BudgetPlan
+import com.fintracker.app.domain.budget.BankAllocator
 import com.fintracker.app.domain.budget.BucketAllocator
 import com.fintracker.app.domain.budget.FULL_ALLOCATION_BASIS_POINTS
 import com.fintracker.app.domain.budget.IncomeSource
@@ -57,6 +60,7 @@ class BudgetScreen(
         )
         page.addView(createIncomeCard(), margins(top = 22, width = LinearLayout.LayoutParams.MATCH_PARENT))
         page.addView(createSummaryCard(), margins(top = 14, width = LinearLayout.LayoutParams.MATCH_PARENT))
+        page.addView(createBankAllocationCard(), margins(top = 14, width = LinearLayout.LayoutParams.MATCH_PARENT))
 
         val sectionHeader = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -140,15 +144,23 @@ class BudgetScreen(
                     setOnClickListener { showIncomeSourceDialog(source) }
                 }
                 sourceRow.addView(
-                    text(source.name, 13f, palette.softMint),
+                    LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
+                        addView(text(source.name, 13f, palette.softMint))
+                        bankName(source.bankId)?.let { addView(text(it, 11f, palette.softMint), margins(top = 2)) }
+                    },
                     LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
                 )
                 sourceRow.addView(
                     text(MoneyAmount.formatRupees(source.amountInPaise), 13f, Color.WHITE, Typeface.BOLD, Gravity.END),
                 )
-                card.addView(sourceRow, margins(top = 8))
+                card.addView(sourceRow, margins(top = 8, width = LinearLayout.LayoutParams.MATCH_PARENT))
             }
         }
+        card.addView(
+            actionButton("Manage banks", filled = false) { showBankManagerDialog() },
+            margins(top = 10),
+        )
         return card
     }
 
@@ -192,6 +204,60 @@ class BudgetScreen(
             text("Bucket targets total ${MoneyAmount.formatPercent(targetShare)}", 12f, palette.muted),
             margins(top = 10),
         )
+        return card
+    }
+
+    private fun createBankAllocationCard(): View {
+        val allocations = BankAllocator.summarize(plan.banks, plan.buckets)
+        val card = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(16), dp(18), dp(16))
+            background = rounded(palette.surface, 20, palette.outline)
+        }
+        card.addView(text("Bank allocation", 17f, palette.ink, Typeface.BOLD))
+        card.addView(
+            text("Planned amounts grouped by bank and bucket", 12f, palette.muted),
+            margins(top = 3, bottom = 10),
+        )
+
+        if (allocations.isEmpty()) {
+            card.addView(text("Add planned amounts to see what to keep in each bank.", 13f, palette.muted))
+            return card
+        }
+
+        allocations.forEachIndexed { index, allocation ->
+            if (index > 0) card.addView(divider(), margins(top = 9, bottom = 9))
+            val bankRow = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            bankRow.addView(
+                text(allocation.bankName, 15f, palette.primary, Typeface.BOLD),
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            bankRow.addView(
+                text(MoneyAmount.formatRupees(allocation.totalInPaise), 15f, palette.ink, Typeface.BOLD, Gravity.END),
+            )
+            card.addView(bankRow)
+
+            allocation.bucketAmounts.forEach { amount ->
+                val bucketRow = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                bucketRow.addView(
+                    text(amount.bucketName, 12f, palette.muted),
+                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+                )
+                bucketRow.addView(
+                    text(MoneyAmount.formatRupees(amount.amountInPaise), 12f, palette.muted, gravity = Gravity.END),
+                )
+                card.addView(
+                    bucketRow,
+                    margins(top = 4, width = LinearLayout.LayoutParams.MATCH_PARENT),
+                )
+            }
+        }
         return card
     }
 
@@ -303,14 +369,12 @@ class BudgetScreen(
             setPadding(dp(4), dp(9), dp(4), dp(9))
             isClickable = true
             isFocusable = true
-            contentDescription = "${item.label}, ${item.account}, ${MoneyAmount.formatRupees(item.amountInPaise)}. Edit amount"
+            contentDescription = "${item.label}, ${bankName(item.bankId) ?: "No bank selected"}, ${MoneyAmount.formatRupees(item.amountInPaise)}. Edit amount"
             setOnClickListener { showLineItemDialog(item) }
         }
         val labels = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         labels.addView(text(item.label, 14f, palette.ink, Typeface.NORMAL))
-        if (item.account.isNotBlank()) {
-            labels.addView(text(item.account, 11f, palette.muted), margins(top = 3))
-        }
+        bankName(item.bankId)?.let { labels.addView(text(it, 11f, palette.muted), margins(top = 3)) }
         row.addView(labels, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         row.addView(
             text(MoneyAmount.formatRupees(item.amountInPaise), 14f, palette.ink, Typeface.BOLD, Gravity.END),
@@ -323,10 +387,11 @@ class BudgetScreen(
     private fun showIncomeSourceDialog(source: IncomeSource? = null) {
         val name = inputField("Source name", source?.name.orEmpty(), decimal = false)
         val amount = inputField("Monthly amount in rupees", source?.let { MoneyAmount.toInputRupees(it.amountInPaise) } ?: "0", decimal = true)
+        val bank = bankSelector(source?.bankId)
         val error = errorText()
         val builder = AlertDialog.Builder(context)
             .setTitle(if (source == null) "Add income source" else "Edit income source")
-            .setView(dialogContent(name, amount, error))
+            .setView(dialogContent(name, amount, bank.view, error))
             .setNegativeButton("Cancel", null)
             .setPositiveButton(if (source == null) "Add" else "Save", null)
         if (source != null) builder.setNeutralButton("Remove", null)
@@ -341,13 +406,21 @@ class BudgetScreen(
                         it.id != source?.id && it.name.equals(cleanedName, ignoreCase = true)
                     } -> error.text = "An income source with this name already exists."
                     amountInPaise == null -> error.text = "Enter a non-negative amount with up to two decimal places."
+                    selectedBankId(bank) == null -> error.text = "Select a bank for this income source."
                     source == null -> {
                         dialog.dismiss()
-                        onCommand(BudgetCommand.AddIncomeSource(cleanedName, amountInPaise))
+                        onCommand(BudgetCommand.AddIncomeSource(cleanedName, amountInPaise, selectedBankId(bank)))
                     }
                     else -> {
                         dialog.dismiss()
-                        onCommand(BudgetCommand.UpdateIncomeSource(source.id, cleanedName, amountInPaise))
+                        onCommand(
+                            BudgetCommand.UpdateIncomeSource(
+                                source.id,
+                                cleanedName,
+                                amountInPaise,
+                                selectedBankId(bank),
+                            ),
+                        )
                     }
                 }
             }
@@ -397,11 +470,12 @@ class BudgetScreen(
 
     private fun showLineItemDialog(item: BudgetLineItem) {
         val field = inputField("Amount in rupees", MoneyAmount.toInputRupees(item.amountInPaise), decimal = true)
+        val bank = bankSelector(item.bankId)
         val error = errorText()
         val dialog = AlertDialog.Builder(context)
             .setTitle(item.label)
-            .setMessage(if (item.account.isBlank()) "Edit the planned amount." else "${item.account} · edit the planned amount.")
-            .setView(dialogContent(field, error))
+            .setMessage("Edit the planned amount and select the bank used for this category.")
+            .setView(dialogContent(field, bank.view, error))
             .setNegativeButton("Cancel", null)
             .setNeutralButton("Remove", null)
             .setPositiveButton("Save", null)
@@ -410,9 +484,10 @@ class BudgetScreen(
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val amount = MoneyAmount.parseRupeesToPaise(field.text.toString())
                 if (amount == null) error.text = "Enter a non-negative amount with up to two decimal places."
+                else if (selectedBankId(bank) == null) error.text = "Select a bank for this category."
                 else {
                     dialog.dismiss()
-                    onCommand(BudgetCommand.UpdateLineItem(item.id, amount))
+                    onCommand(BudgetCommand.UpdateLineItem(item.id, amount, selectedBankId(bank)))
                 }
             }
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
@@ -430,12 +505,12 @@ class BudgetScreen(
 
     private fun showAddLineItemDialog(bucket: BudgetBucket) {
         val label = inputField("Category name", "", decimal = false)
-        val account = inputField("Account (optional)", "", decimal = false)
+        val bank = bankSelector(null)
         val amount = inputField("Amount in rupees", "0", decimal = true)
         val error = errorText()
         val dialog = AlertDialog.Builder(context)
             .setTitle("Add to ${bucket.name}")
-            .setView(dialogContent(label, account, amount, error))
+            .setView(dialogContent(label, bank.view, amount, error))
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Add", null)
             .create()
@@ -450,12 +525,16 @@ class BudgetScreen(
                     error.text = "Enter a non-negative amount with up to two decimal places."
                     false
                 }
+                selectedBankId(bank) == null -> {
+                    error.text = "Select a bank for this category."
+                    false
+                }
                 else -> {
                     onCommand(
                         BudgetCommand.AddLineItem(
                             bucketId = bucket.id,
                             label = label.text.toString(),
-                            account = account.text.toString(),
+                            bankId = selectedBankId(bank),
                             amountInPaise = parsedAmount,
                         ),
                     )
@@ -464,6 +543,135 @@ class BudgetScreen(
             }
         }
     }
+
+    private fun showAddBankDialog() {
+        val name = inputField("Bank name", "", decimal = false)
+        val error = errorText()
+        val dialog = AlertDialog.Builder(context)
+            .setTitle("Add a bank")
+            .setMessage("Bank names stay on this device and can be selected for income or categories.")
+            .setView(dialogContent(name, error))
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Add", null)
+            .create()
+        showWithValidation(dialog) {
+            val cleanedName = name.text.toString().trim()
+            when {
+                cleanedName.isBlank() -> {
+                    error.text = "Enter a bank name."
+                    false
+                }
+                plan.banks.any { it.name.equals(cleanedName, ignoreCase = true) } -> {
+                    error.text = "A bank with this name already exists."
+                    false
+                }
+                else -> {
+                    onCommand(BudgetCommand.AddBank(cleanedName))
+                    true
+                }
+            }
+        }
+    }
+
+    private fun showBankManagerDialog() {
+        lateinit var manager: AlertDialog
+        val content = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(8), dp(24), dp(4))
+        }
+        if (plan.banks.isEmpty()) {
+            content.addView(text("No banks added yet.", 14f, palette.muted), margins(bottom = 8))
+        } else {
+            plan.banks.forEach { bank ->
+                val usageCount = plan.incomeSources.count { it.bankId == bank.id } +
+                    plan.buckets.flatMap { it.lineItems }.count { it.bankId == bank.id }
+                val row = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                row.addView(
+                    LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
+                        addView(text(bank.name, 15f, palette.ink))
+                        if (usageCount > 0) {
+                            addView(
+                                text("Used by $usageCount budget item${if (usageCount == 1) "" else "s"}", 11f, palette.muted),
+                                margins(top = 2),
+                            )
+                        }
+                    },
+                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+                )
+                val remove = actionButton(if (usageCount > 0) "In use" else "Remove", filled = false) {
+                    manager.dismiss()
+                    AlertDialog.Builder(context)
+                        .setTitle("Remove ${bank.name}?")
+                        .setMessage("This bank is not assigned to any income source or category.")
+                        .setNegativeButton("Cancel", null)
+                        .setPositiveButton("Remove") { _, _ -> onCommand(BudgetCommand.DeleteBank(bank.id)) }
+                        .show()
+                }
+                if (usageCount > 0) {
+                    remove.isEnabled = false
+                    remove.isClickable = false
+                    remove.isFocusable = false
+                    remove.alpha = 0.55f
+                }
+                row.addView(remove)
+                content.addView(row, margins(bottom = 6, width = LinearLayout.LayoutParams.MATCH_PARENT))
+            }
+        }
+        content.addView(
+            actionButton("+ Add bank") {
+                manager.dismiss()
+                showAddBankDialog()
+            },
+            margins(top = 8),
+        )
+        manager = AlertDialog.Builder(context)
+            .setTitle("Manage banks")
+            .setView(content)
+            .setNegativeButton("Done", null)
+            .create()
+        manager.show()
+    }
+
+    private fun bankSelector(selectedBankId: String?): BankSelectionField {
+        val options = listOf(BankOption(null, "No bank selected")) + plan.banks.map { BankOption(it.id, it.name) }
+        val spinner = Spinner(context).apply {
+            adapter = ArrayAdapter(context, android.R.layout.simple_spinner_item, options).apply {
+                setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            setSelection(options.indexOfFirst { it.id == selectedBankId }.coerceAtLeast(0))
+            minimumHeight = dp(48)
+            contentDescription = "Select bank"
+        }
+        val field = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(palette.surface, 12, palette.outline)
+            setPadding(dp(12), dp(8), dp(8), dp(4))
+            addView(
+                text("BANK ACCOUNT", 10f, palette.muted, Typeface.BOLD, letterSpacing = 0.08f),
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
+            )
+            addView(
+                spinner,
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
+            )
+        }
+        return BankSelectionField(field, spinner)
+    }
+
+    private fun selectedBankId(bank: BankSelectionField): String? =
+        (bank.spinner.selectedItem as? BankOption)?.id
+
+    private fun bankName(bankId: String?): String? = plan.banks.firstOrNull { it.id == bankId }?.name
+
+    private data class BankOption(val id: String?, val name: String) {
+        override fun toString(): String = name
+    }
+
+    private data class BankSelectionField(val view: View, val spinner: Spinner)
 
     private fun showAddBucketDialog() {
         val name = inputField("Bucket name", "", decimal = false)
@@ -537,7 +745,10 @@ class BudgetScreen(
         orientation = LinearLayout.VERTICAL
         setPadding(dp(24), dp(8), dp(24), dp(4))
         views.forEachIndexed { index, view ->
-            addView(view, margins(top = if (index == 0) 0 else 10))
+            addView(
+                view,
+                margins(top = if (index == 0) 0 else 10, width = LinearLayout.LayoutParams.MATCH_PARENT),
+            )
         }
     }
 

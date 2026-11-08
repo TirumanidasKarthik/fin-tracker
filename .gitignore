@@ -5,4 +5,16 @@ build/
 local.properties
 *.iml
 .idea/
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+*.jks
+*.keystore
+*.p12
+*.pfx
+secrets.properties
+google-services.json
 
