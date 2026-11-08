@@ -291,8 +291,9 @@ class BudgetScreen(
         val bucketText = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         bucketText.addView(text(bucket.name, 16f, palette.ink, Typeface.BOLD))
         val targetAmount = targetAmounts[bucket.id] ?: 0L
+        val currentPercent = MoneyAmount.formatPercentOf(bucket.plannedAmountInPaise, plan.monthlyIncomeInPaise)
         val targetLabel = text(
-            "Target ${MoneyAmount.formatPercent(bucket.shareBasisPoints)} · ${MoneyAmount.formatRupees(targetAmount)}",
+            "Current $currentPercent · Target ${MoneyAmount.formatPercent(bucket.shareBasisPoints)} · ${MoneyAmount.formatRupees(targetAmount)}",
             12f,
             palette.primary,
             Typeface.BOLD,
@@ -300,7 +301,7 @@ class BudgetScreen(
             isClickable = true
             isFocusable = true
             setOnClickListener { showTargetDialog(bucket) }
-            contentDescription = "Edit ${bucket.name} target, ${MoneyAmount.formatPercent(bucket.shareBasisPoints)}"
+            contentDescription = "${bucket.name}: current $currentPercent, target ${MoneyAmount.formatPercent(bucket.shareBasisPoints)}. Edit target"
         }
         bucketText.addView(targetLabel, margins(top = 5))
         header.addView(bucketText, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
@@ -356,6 +357,13 @@ class BudgetScreen(
         details.addView(
             actionButton("+ Add category", filled = false) { showAddLineItemDialog(bucket) },
             margins(top = 10),
+        )
+        details.addView(
+            actionButton("Delete bucket", filled = false) { showDeleteBucketDialog(bucket) }.apply {
+                setTextColor(palette.warning)
+                background = rounded(palette.surface, 12, palette.warning)
+            },
+            margins(top = 8),
         )
         details.visibility = if (bucket.id in expandedBucketIds) View.VISIBLE else View.GONE
         card.addView(details)
@@ -675,7 +683,7 @@ class BudgetScreen(
 
     private fun showAddBucketDialog() {
         val name = inputField("Bucket name", "", decimal = false)
-        val target = inputField("Target percent", "0", decimal = true)
+        val target = inputField("Target percent (0–100%)", "", decimal = true)
         val error = errorText()
         val dialog = AlertDialog.Builder(context)
             .setTitle("Add a bucket")
@@ -709,6 +717,18 @@ class BudgetScreen(
                 }
             }
         }
+    }
+
+    private fun showDeleteBucketDialog(bucket: BudgetBucket) {
+        AlertDialog.Builder(context)
+            .setTitle("Delete ${bucket.name}?")
+            .setMessage("This will permanently remove this bucket and all its categories and planned amounts.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Delete") { _, _ ->
+                expandedBucketIds.remove(bucket.id)
+                onCommand(BudgetCommand.DeleteBucket(bucket.id))
+            }
+            .show()
     }
 
     private fun showWithValidation(dialog: AlertDialog, validate: () -> Boolean) {

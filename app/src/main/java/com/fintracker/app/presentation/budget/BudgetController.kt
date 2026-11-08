@@ -32,6 +32,7 @@ class BudgetController(private val repository: BudgetRepository) {
                 command.bankId,
             )
             is BudgetCommand.AddBucket -> repository.addBucket(command.name, command.shareBasisPoints)
+            is BudgetCommand.DeleteBucket -> repository.deleteBucket(command.bucketId)
             is BudgetCommand.AddLineItem -> repository.addLineItem(
                 command.bucketId,
                 command.label,

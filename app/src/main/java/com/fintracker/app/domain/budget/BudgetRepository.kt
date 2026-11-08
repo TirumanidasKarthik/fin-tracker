@@ -10,6 +10,7 @@ interface BudgetRepository {
     fun updateBucketTarget(bucketId: String, shareBasisPoints: Int)
     fun updateLineItem(lineItemId: String, amountInPaise: Long, bankId: String?)
     fun addBucket(name: String, shareBasisPoints: Int)
+    fun deleteBucket(bucketId: String)
     fun addLineItem(bucketId: String, label: String, bankId: String?, amountInPaise: Long)
     fun deleteLineItem(lineItemId: String)
 }
