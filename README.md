@@ -5,6 +5,7 @@ A lightweight native Android app for planning monthly income across spending, sa
 ## Current features
 
 - Multiple named monthly income sources with an automatically calculated total.
+- A local bank list; select a bank for each income source and budget category.
 - Editable bucket target percentages and planned categories with account labels.
 - Local SQLite storage with a schema migration that preserves existing budget data.
 - No login, Internet permission, remote database, or cloud/device backup of app data.

@@ -2,12 +2,14 @@ package com.fintracker.app.domain.budget
 
 interface BudgetRepository {
     fun loadPlan(): BudgetPlan
-    fun addIncomeSource(name: String, amountInPaise: Long)
-    fun updateIncomeSource(sourceId: String, name: String, amountInPaise: Long)
+    fun addBank(name: String)
+    fun deleteBank(bankId: String)
+    fun addIncomeSource(name: String, amountInPaise: Long, bankId: String?)
+    fun updateIncomeSource(sourceId: String, name: String, amountInPaise: Long, bankId: String?)
     fun deleteIncomeSource(sourceId: String)
     fun updateBucketTarget(bucketId: String, shareBasisPoints: Int)
-    fun updateLineItemAmount(lineItemId: String, amountInPaise: Long)
+    fun updateLineItem(lineItemId: String, amountInPaise: Long, bankId: String?)
     fun addBucket(name: String, shareBasisPoints: Int)
-    fun addLineItem(bucketId: String, label: String, account: String, amountInPaise: Long)
+    fun addLineItem(bucketId: String, label: String, bankId: String?, amountInPaise: Long)
     fun deleteLineItem(lineItemId: String)
 }
