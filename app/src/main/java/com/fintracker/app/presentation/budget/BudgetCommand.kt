@@ -14,6 +14,7 @@ sealed interface BudgetCommand {
     data class UpdateTarget(val bucketId: String, val shareBasisPoints: Int) : BudgetCommand
     data class UpdateLineItem(val lineItemId: String, val amountInPaise: Long, val bankId: String?) : BudgetCommand
     data class AddBucket(val name: String, val shareBasisPoints: Int) : BudgetCommand
+    data class DeleteBucket(val bucketId: String) : BudgetCommand
     data class AddLineItem(
         val bucketId: String,
         val label: String,

@@ -27,4 +27,11 @@ class MoneyAmountTest {
         assertEquals("40.5%", MoneyAmount.formatPercent(4_050))
         assertEquals("5%", MoneyAmount.formatPercent(500))
     }
+
+    @Test
+    fun formatsCurrentShareOfIncomeToTwoDecimalPlaces() {
+        assertEquals("40%", MoneyAmount.formatPercentOf(40_000, 100_000))
+        assertEquals("12.35%", MoneyAmount.formatPercentOf(123_456, 1_000_000))
+        assertEquals("0%", MoneyAmount.formatPercentOf(1, 0))
+    }
 }

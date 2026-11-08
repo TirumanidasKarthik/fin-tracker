@@ -261,6 +261,15 @@ class SqliteBudgetRepository(private val database: BudgetDatabase) : BudgetRepos
         )
     }
 
+    override fun deleteBucket(bucketId: String) {
+        val count = database.writableDatabase.delete(
+            BudgetDatabase.TABLE_BUCKET,
+            "id = ?",
+            arrayOf(bucketId),
+        )
+        check(count == 1) { "Budget bucket was not found." }
+    }
+
     override fun deleteLineItem(lineItemId: String) {
         val count = database.writableDatabase.delete(
             BudgetDatabase.TABLE_LINE_ITEM,

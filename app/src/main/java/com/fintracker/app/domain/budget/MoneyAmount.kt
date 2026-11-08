@@ -57,4 +57,16 @@ object MoneyAmount {
         val decimals = "%02d".format(fractional).trimEnd('0')
         return "$whole.$decimals%"
     }
+
+    /** Formats the share of [total] represented by [amount], rounded to 0.01%. */
+    fun formatPercentOf(amount: Long, total: Long): String {
+        require(amount >= 0) { "Amount cannot be negative." }
+        require(total >= 0) { "Total cannot be negative." }
+        if (total == 0L) return formatPercent(0)
+        val basisPoints = BigDecimal.valueOf(amount)
+            .multiply(BigDecimal.valueOf(FULL_ALLOCATION_BASIS_POINTS.toLong()))
+            .divide(BigDecimal.valueOf(total), 0, RoundingMode.HALF_UP)
+            .intValueExact()
+        return formatPercent(basisPoints)
+    }
 }
