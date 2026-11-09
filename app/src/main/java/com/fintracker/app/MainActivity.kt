@@ -1,9 +1,9 @@
 package com.fintracker.app
 
 import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import android.view.Gravity
-import android.view.View
 import android.widget.FrameLayout
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -11,6 +11,7 @@ import android.widget.Toast
 import com.fintracker.app.data.local.BudgetDatabase
 import com.fintracker.app.data.repository.SqliteBudgetRepository
 import com.fintracker.app.domain.budget.BudgetPlan
+import com.fintracker.app.presentation.backup.BudgetBackupCoordinator
 import com.fintracker.app.presentation.budget.BudgetCommand
 import com.fintracker.app.presentation.budget.BudgetController
 import com.fintracker.app.presentation.budget.BudgetScreen
@@ -20,6 +21,7 @@ import java.util.concurrent.Executors
 class MainActivity : Activity() {
     private lateinit var executor: ExecutorService
     private lateinit var controller: BudgetController
+    private lateinit var backupCoordinator: BudgetBackupCoordinator
     private val expandedBucketIds = mutableSetOf("expenses")
     private var content: FrameLayout? = null
 
@@ -27,6 +29,7 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         executor = Executors.newSingleThreadExecutor()
         controller = BudgetController(SqliteBudgetRepository(BudgetDatabase(this)))
+        backupCoordinator = BudgetBackupCoordinator(this, controller, executor, ::render)
         content = FrameLayout(this).apply {
             setOnApplyWindowInsetsListener { view, insets ->
                 view.setPadding(
@@ -47,6 +50,12 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         if (::executor.isInitialized) executor.shutdown()
         super.onDestroy()
+    }
+
+    @Deprecated("Use the activity result API when the app adopts AndroidX Activity.")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        backupCoordinator.onActivityResult(requestCode, resultCode, data)
     }
 
     private fun loadPlan() {
@@ -71,17 +80,25 @@ class MainActivity : Activity() {
     private fun render(plan: BudgetPlan) {
         if (isFinishing || isDestroyed) return
         content?.removeAllViews()
-        content?.addView(BudgetScreen(this, plan, expandedBucketIds, ::execute).createView())
+        content?.addView(
+            BudgetScreen(
+                this,
+                plan,
+                expandedBucketIds,
+                ::execute,
+                backupCoordinator::requestExport,
+                backupCoordinator::requestImport,
+            ).createView(),
+        )
     }
 
     private fun showLoading() {
         val frame = FrameLayout(this)
         frame.setBackgroundColor(android.graphics.Color.rgb(245, 244, 239))
-        frame.addView(ProgressBar(this), FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            Gravity.CENTER,
-        ))
+        frame.addView(
+            ProgressBar(this),
+            FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER),
+        )
         content?.addView(frame)
     }
 

@@ -6,6 +6,11 @@ import com.fintracker.app.domain.budget.BudgetRepository
 class BudgetController(private val repository: BudgetRepository) {
     fun loadPlan(): BudgetPlan = repository.loadPlan()
 
+    fun replacePlan(plan: BudgetPlan): BudgetPlan {
+        repository.replacePlan(plan)
+        return repository.loadPlan()
+    }
+
     fun execute(command: BudgetCommand): BudgetPlan {
         when (command) {
             is BudgetCommand.AddBank -> repository.addBank(command.name)

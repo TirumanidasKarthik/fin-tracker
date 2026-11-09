@@ -32,6 +32,8 @@ class BudgetScreen(
     private val plan: BudgetPlan,
     private val expandedBucketIds: MutableSet<String>,
     private val onCommand: (BudgetCommand) -> Unit,
+    private val onExportBackup: () -> Unit,
+    private val onImportBackup: () -> Unit,
 ) {
     private val palette = BudgetPalette
     private val targetAmounts = BucketAllocator.allocate(
@@ -85,6 +87,8 @@ class BudgetScreen(
             )
         }
 
+        page.addView(createBackupCard(), margins(top = 18, width = LinearLayout.LayoutParams.MATCH_PARENT))
+
         page.addView(
             text(
                 "Your budget is saved on this phone only.",
@@ -109,6 +113,32 @@ class BudgetScreen(
             setBackgroundColor(palette.background)
             addView(scroll, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
         }
+    }
+
+    private fun createBackupCard(): View {
+        val card = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+            background = rounded(palette.surface, 18, palette.outline)
+        }
+        card.addView(text("Encrypted local backup", 16f, palette.ink, Typeface.BOLD))
+        card.addView(
+            text("Export or restore your budget using a password-protected file.", 13f, palette.muted),
+            margins(top = 5),
+        )
+        val actions = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        actions.addView(
+            actionButton("Export backup") { onExportBackup() },
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
+        )
+        actions.addView(
+            actionButton("Restore backup", filled = false) { onImportBackup() },
+            margins(top = 8, width = LinearLayout.LayoutParams.MATCH_PARENT),
+        )
+        card.addView(actions, margins(top = 12, width = LinearLayout.LayoutParams.MATCH_PARENT))
+        return card
     }
 
     private fun createIncomeCard(): View {
@@ -300,6 +330,7 @@ class BudgetScreen(
         ).apply {
             isClickable = true
             isFocusable = true
+            maxLines = 2
             setOnClickListener { showTargetDialog(bucket) }
             contentDescription = "${bucket.name}: current $currentPercent, target ${MoneyAmount.formatPercent(bucket.shareBasisPoints)}. Edit target"
         }
@@ -309,6 +340,8 @@ class BudgetScreen(
         val amountText = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            // Keep enough room for a grouped five-digit rupee amount such as ₹20,000.
+            minimumWidth = dp(104)
         }
         amountText.addView(
             text(MoneyAmount.formatRupees(bucket.plannedAmountInPaise), 16f, palette.ink, Typeface.BOLD, Gravity.END),

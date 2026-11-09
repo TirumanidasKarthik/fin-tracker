@@ -11,8 +11,85 @@ import com.fintracker.app.domain.budget.Bank
 import com.fintracker.app.domain.budget.IncomeSource
 import com.fintracker.app.domain.budget.FULL_ALLOCATION_BASIS_POINTS
 import java.util.UUID
+import java.util.Locale
 
 class SqliteBudgetRepository(private val database: BudgetDatabase) : BudgetRepository {
+    override fun replacePlan(plan: BudgetPlan) {
+        require(plan.banks.map { it.name.trim().lowercase(Locale.ROOT) }.distinct().size == plan.banks.size) {
+            "The backup contains duplicate bank names."
+        }
+        require(plan.incomeSources.map { it.name.trim().lowercase(Locale.ROOT) }.distinct().size == plan.incomeSources.size) {
+            "The backup contains duplicate income source names."
+        }
+        require(plan.buckets.map { it.name.trim().lowercase(Locale.ROOT) }.distinct().size == plan.buckets.size) {
+            "The backup contains duplicate bucket names."
+        }
+
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete(BudgetDatabase.TABLE_LINE_ITEM, null, null)
+            db.delete(BudgetDatabase.TABLE_INCOME_SOURCE, null, null)
+            db.delete(BudgetDatabase.TABLE_BUCKET, null, null)
+            db.delete(BudgetDatabase.TABLE_BANK, null, null)
+
+            plan.banks.forEachIndexed { index, bank ->
+                db.insertOrThrow(
+                    BudgetDatabase.TABLE_BANK,
+                    null,
+                    ContentValues().apply {
+                        put("id", bank.id)
+                        put("name", bank.name.trim())
+                        put("sort_order", index)
+                    },
+                )
+            }
+            plan.incomeSources.forEachIndexed { index, income ->
+                db.insertOrThrow(
+                    BudgetDatabase.TABLE_INCOME_SOURCE,
+                    null,
+                    ContentValues().apply {
+                        put("id", income.id)
+                        put("name", income.name.trim())
+                        put("amount_paise", income.amountInPaise)
+                        if (income.bankId == null) putNull("bank_id") else put("bank_id", income.bankId)
+                        put("sort_order", index)
+                    },
+                )
+            }
+            plan.buckets.forEachIndexed { bucketIndex, bucket ->
+                db.insertOrThrow(
+                    BudgetDatabase.TABLE_BUCKET,
+                    null,
+                    ContentValues().apply {
+                        put("id", bucket.id)
+                        put("name", bucket.name.trim())
+                        put("target_share_basis_points", bucket.shareBasisPoints)
+                        put("sort_order", bucketIndex)
+                    },
+                )
+                bucket.lineItems.forEachIndexed { itemIndex, item ->
+                    db.insertOrThrow(
+                        BudgetDatabase.TABLE_LINE_ITEM,
+                        null,
+                        ContentValues().apply {
+                            put("id", item.id)
+                            put("bucket_id", bucket.id)
+                            put("label", item.label.trim())
+                            put("account", "")
+                            if (item.bankId == null) putNull("bank_id") else put("bank_id", item.bankId)
+                            put("amount_paise", item.amountInPaise)
+                            put("sort_order", itemIndex)
+                        },
+                    )
+                }
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     override fun loadPlan(): BudgetPlan {
         val db = database.readableDatabase
         val banks = db.query(

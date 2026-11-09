@@ -2,6 +2,7 @@ package com.fintracker.app.domain.budget
 
 interface BudgetRepository {
     fun loadPlan(): BudgetPlan
+    fun replacePlan(plan: BudgetPlan)
     fun addBank(name: String)
     fun deleteBank(bankId: String)
     fun addIncomeSource(name: String, amountInPaise: Long, bankId: String?)
