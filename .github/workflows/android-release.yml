@@ -1,0 +1,102 @@
+name: Android release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-sign:
+    runs-on: ubuntu-latest
+    environment: android-release
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Check tag and app version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          expected_version="${RELEASE_TAG#v}"
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag must use vMAJOR.MINOR.PATCH (received: $RELEASE_TAG)" >&2
+            exit 1
+          fi
+          if ! grep -Fq "versionName = \"$expected_version\"" app/build.gradle.kts; then
+            echo "Update app/build.gradle.kts versionName to $expected_version before tagging." >&2
+            exit 1
+          fi
+
+      - name: Decode signing key
+        env:
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          for secret_name in ANDROID_RELEASE_KEYSTORE_BASE64 ANDROID_RELEASE_KEY_ALIAS ANDROID_RELEASE_KEYSTORE_PASSWORD ANDROID_RELEASE_KEY_PASSWORD; do
+            if [[ -z "${!secret_name}" ]]; then
+              echo "Missing required Android signing secret: $secret_name" >&2
+              exit 1
+            fi
+          done
+          umask 077
+          printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release-keystore.jks"
+          echo "ANDROID_RELEASE_KEYSTORE_FILE=$RUNNER_TEMP/release-keystore.jks" >> "$GITHUB_ENV"
+
+      - name: Run tests and build signed APK
+        env:
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: bash ./gradlew :app:testDebugUnitTest :app:assembleRelease
+
+      - name: Verify APK signature
+        run: "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
+
+      - name: Remove signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release-keystore.jks"
+
+      - name: Stage signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: fin-tracker-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-release:
+    needs: build-and-sign
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download signed APK
+        uses: actions/download-artifact@v4
+        with:
+          name: fin-tracker-release-apk
+          path: release-assets
+
+      - name: Publish APK to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" release-assets/app-release.apk --title "$RELEASE_TAG" --generate-notes
